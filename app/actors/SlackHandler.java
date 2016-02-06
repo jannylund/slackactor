@@ -10,16 +10,22 @@ import com.ullink.slack.simpleslackapi.SlackChannel;
 import com.ullink.slack.simpleslackapi.SlackSession;
 import com.ullink.slack.simpleslackapi.impl.SlackSessionFactory;
 import play.Configuration;
-import play.Logger;
 import scala.concurrent.duration.Duration;
 
-import static akka.pattern.Patterns.ask;
-
+import static actors.SlackHandlerProtocol.Say;
 
 public class SlackHandler extends UntypedActor {
 
+    private final String authToken;
+    private final String channel;
+    private final Long tickerInterval;
+
     @Inject
-    Configuration configuration;
+    public SlackHandler(Configuration configuration) {
+        authToken = configuration.getString("slack.auth-token");
+        channel = configuration.getString("slack.channel");
+        tickerInterval = configuration.getLong("slack.ticker", 1000L);
+    }
 
     private SlackSession slackSession;
     private SlackChannel slackChannel;
@@ -27,35 +33,26 @@ public class SlackHandler extends UntypedActor {
 
     @Override
     public void preStart() throws IOException {
-        Logger.debug("Starting up slacker");
-        Configuration slackConfig = configuration.getConfig("slack");
-
-        slackSession = SlackSessionFactory.createWebSocketSlackSession(slackConfig.getString("auth-token"));
+        slackSession = SlackSessionFactory.createWebSocketSlackSession(authToken);
         // TODO: handle exception here and set duration for retry.
         slackSession.connect();
-        slackChannel = slackSession.findChannelByName(slackConfig.getString("channel"));
-
-        getSelf().tell(new SlackHandlerProtocol.Say("actor starting up"), getSelf());
-
-        final Long tickerInterval = slackConfig.getLong("ticker", 1000L);
+        slackChannel = slackSession.findChannelByName(channel);
         tick = getContext().system().scheduler().schedule(
                 Duration.create(tickerInterval, TimeUnit.MILLISECONDS),
                 Duration.create(tickerInterval, TimeUnit.MILLISECONDS),
-                getSelf(), new SlackHandlerProtocol.Say("tick"), getContext().dispatcher(), null);
+                getSelf(), new Say("tick"), getContext().dispatcher(), null);
     }
 
     @Override
     public void postStop() throws IOException {
         tick.cancel();
-        ask(getSelf(), new SlackHandlerProtocol.Say("actor going down"), 1000);
         slackSession.disconnect();
-        Logger.debug("shutting down slacker");
     }
 
     @Override
     public void onReceive(Object message) throws Exception {
         if (message instanceof SlackHandlerProtocol.Say) {
-            slackSession.sendMessage(slackChannel, ((SlackHandlerProtocol.Say) message).msg, null);
+            slackSession.sendMessage(slackChannel, ((Say) message).msg, null);
         } else {
             unhandled(message);
         }
