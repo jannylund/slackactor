@@ -1,4 +1,4 @@
-name := """slackactor"""
+name := """slacktor"""
 
 version := "1.0-SNAPSHOT"
 
